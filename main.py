@@ -4,28 +4,29 @@ import re
 from textblob import TextBlob
 import pandas
 from textgenrnn import textgenrnn
-
+import time
+import sys
 
 get_tweet_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.path.join('Optimized-Modified-GetOldTweets3-OMGOT-fix-api', 'GetOldTweets3-0.0.10'))
-outfile = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.path.join('output', 'output.txt'))
+output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
 
 
-def gather_tweets(kwd):
-    # Create command to pull tweets based on a certain keyword and output to csv
+def gather_tweets(kwd, loc, f):
+    # Create command to pull tweets based on a certain keyword
     # Limit (increments of 20) - we will investigate how this impacts our results
-    cmd = 'python cli.py -s ' + kwd + ' --limit 1000 --links exclude --lang en --near Chicago'
+    # Links - we wnat to exclude tweets with links to avoid ads and having to remove links manually
+    cmd = 'python cli.py -s ' + kwd + ' --limit 1000 --links exclude --lang en --near ' + loc
 
     # CD into directory of GetOldTweets code and run code
     os.chdir(get_tweet_path)
 
     # Open output file and redirect output of the GetTweet command to text file
-    with open(outfile, 'w') as out:
+    with open(f, 'w') as out:
         p = subprocess.run(cmd, stdout=out, stderr=out)
 
 
 def clean_tweet(tweet):
-    # Strip twitter mentions (@username), punctuation and special characters and emojis, and twtter usernames (<username>)
-    # TODO: get rid of website links
+    # Strip twitter mentions (@username), punctuation and special characters and emojis, and twitter usernames (<username>)
     return ' '.join(re.sub("(<[\w]+>)|(@[\w]+)|([^0-9A-Za-z \t])|(\w+:\/ \/ \S+)", " ", tweet).split())
 
 
@@ -67,19 +68,19 @@ def analyze_sentiment(tweet):
         return 'negative'
 
 
-def analyze_tweets():
+def analyze_tweets(f):
     # Format options used only for appearance of output in IDE window
     pandas.set_option('display.max_columns', None)
 
     # Read the format width text file into a dataframe and add column names
-    tweet_df = pandas.read_fwf(outfile, header=None, colspecs=[
+    tweet_df = pandas.read_fwf(f, header=None, colspecs=[
                                (0, 20), (20, 30), (31, 39), (39, 45), (46, -1)])
     tweet_df.columns = ['id', 'date', 'time', 'val', 'tweet']
 
-    # Clean each tweet
+    # Clean each tweet and remove emojis
     tweet_df['clean'] = [remove_emoji(clean_tweet(tweet)) for tweet in tweet_df['tweet']]
 
-    # Add sentiment of each clean tweet to dataframe
+    # Analyze sentiment of each clean tweet and add to dataframe
     tweet_df['sentiment'] = [analyze_sentiment(
         tweet) for tweet in tweet_df['clean']]
 
@@ -87,32 +88,70 @@ def analyze_tweets():
     return tweet_df[['clean', 'sentiment']].copy()
 
 
-def train_model(path):
+def train_model(path, f):
     textgen = textgenrnn()
 
+    sys.stdout = open(f, 'w')
     # TODO: Explore number of epochs and results
-    textgen.train_from_file(tweet_file, num_epochs=1)
+    textgen.train_from_file(path, num_epochs=5,  max_gen_length=280)
+    sys.stdout = sys.__stdout__
 
-    # Generate lots of examples
-    # TODO: explore temperature - modify length of output
-    print(textgen.generate(10, temperature=0.5))
-
-    # TODO: Output generated text to text file
 
 if __name__ == '__main__':
-    keyword = 'IPhone'
-    gather_tweets(keyword)
+    # keyword = ''
+    # sentiment = ''
+    # location = ''
+    # try:
+    #     opts, args = getopt.getopt(argv, "hk:s:l:", ["keyword=", "sentiment=", "location="])
+    # except getopt.GetoptError:
+    #     print
+    #     'main.py -k <keyword> -s <sentiment> -l <location>'
+    #     sys.exit(2)
+    # for opt, arg in opts:
+    #     if opt == '-h':
+    #         print
+    #         'main.py -k <keyword> -s <sentiment> -l <location>'
+    #         sys.exit()
+    #     elif opt in ("-k", "--keyword"):
+    #         keyword = arg
+    #     elif opt in ("-s", "--sentiment"):
+    #         sentiment = arg
+    #     elif opt in ("-l", "--location"):
+    #         location = arg
 
-    tweet_set = analyze_tweets()
+
+
+
+
+    keyword = 'Peloton'
+    sentiment = 'positive'
+    location = 'Chicago'
+    tweet_file = os.path.join(output_dir, keyword + '_' + location + '_all.txt')
+    sentiment_file = os.path.join(output_dir, keyword + '_' + location + '_' + sentiment + '.txt')
+    output_file = os.path.join(output_dir, keyword + '_' + location + '_' + sentiment + '_generated.txt')
+
+    # Gather tweets from twitter based on keyword and location
+    start = time.time()
+    gather_tweets(keyword, location, tweet_file)
+    get_tweet_time = time.time()
+    print("Time elapsed for scraping tweets from Twitter: ", get_tweet_time - start)
+
+    # Clean and analyze the sentiment of the gathered tweets
+    start = time.time()
+    tweet_set = analyze_tweets(tweet_file)
+    analyze_tweet_time = time.time()
+    print("Time elapsed for sentiment analysis: ", analyze_tweet_time - start)
     print(tweet_set['sentiment'].value_counts())
 
-    sentiment = 'positive'
+    # Gather training set of tweets based on sentiment
     training_set = tweet_set.loc[tweet_set['sentiment'] == sentiment]
-
-    tweet_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.path.join('output', 'training_tweets.txt'))
-    with open(tweet_file, 'w') as f:
+    with open(sentiment_file, 'w') as f:
         f.writelines([line + '\n' for line in training_set['clean']])
 
-    train_model(tweet_file)
+    # Train model on tweet set
+    start = time.time()
+    train_model(sentiment_file, output_file)
+    training_time = time.time()
+    print("Time elapsed for training: ", training_time - start)
 
 
