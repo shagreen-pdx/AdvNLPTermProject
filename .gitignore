@@ -1,3 +1,7 @@
+# Ignore parts of this project
+.idea/
+Optimized-Modified-GetOldTweets3-OMGOT-fix-api/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
