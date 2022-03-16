@@ -14,8 +14,11 @@ output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
 def gather_tweets(kwd, loc, f):
     # Create command to pull tweets based on a certain keyword
     # Limit (increments of 20) - we will investigate how this impacts our results
-    # Links - we wnat to exclude tweets with links to avoid ads and having to remove links manually
-    cmd = 'python cli.py -s ' + kwd + ' --limit 1000 --links exclude --lang en --near ' + loc
+    # Links - we want to exclude tweets with links to avoid ads and having to remove links manually
+    # Lang - we only want english tweets
+    # --> Drawback: our keywords are in english so it'll match all tweets with keyword regardless of rest of language
+    # Near - allows us to specify a location to give us more english results
+    cmd = 'python cli.py -s \"' + kwd + '\" --limit 1000 --links exclude --lang en --near \"' + loc + '\"'
 
     # CD into directory of GetOldTweets code and run code
     os.chdir(get_tweet_path)
@@ -51,6 +54,8 @@ def remove_emoji(string):
                                u"\u231a"
                                u"\ufe0f"  # dingbats
                                u"\u3030"
+                               U"\u200b"
+                               U"\u034f"
                                "]+", flags=re.UNICODE)
     return emoji_pattern.sub(r'', string)
 
@@ -92,8 +97,7 @@ def train_model(path, f):
     textgen = textgenrnn()
 
     sys.stdout = open(f, 'w')
-    # TODO: Explore number of epochs and results
-    textgen.train_from_file(path, num_epochs=5,  max_gen_length=280)
+    textgen.train_from_file(path, num_epochs=25,  max_gen_length=280)
     sys.stdout = sys.__stdout__
 
 
@@ -120,38 +124,40 @@ if __name__ == '__main__':
     #         location = arg
 
 
+    for keyword in ['Apple']:
+        for location in ['Los Angeles']:
+            # Output file for all tweets gathered
+            tweet_file = os.path.join(output_dir, keyword + '_' + location + '_all.txt')
 
+            # Gather tweets from twitter based on keyword and location
+            start = time.time()
+            gather_tweets(keyword, location, tweet_file)
+            get_tweet_time = time.time()
+            print("Time elapsed for scraping tweets from Twitter: ", get_tweet_time - start)
 
+            # Clean and analyze the sentiment of the gathered tweets
+            start = time.time()
+            tweet_set = analyze_tweets(tweet_file)
+            analyze_tweet_time = time.time()
+            print("Time elapsed for sentiment analysis: ", analyze_tweet_time - start)
+            print(tweet_set['sentiment'].value_counts())
 
-    keyword = 'Peloton'
-    sentiment = 'positive'
-    location = 'Chicago'
-    tweet_file = os.path.join(output_dir, keyword + '_' + location + '_all.txt')
-    sentiment_file = os.path.join(output_dir, keyword + '_' + location + '_' + sentiment + '.txt')
-    output_file = os.path.join(output_dir, keyword + '_' + location + '_' + sentiment + '_generated.txt')
+            # for sentiment in ['positive', 'negative', 'neutral']:
+            for sentiment in ['positive']:
 
-    # Gather tweets from twitter based on keyword and location
-    start = time.time()
-    gather_tweets(keyword, location, tweet_file)
-    get_tweet_time = time.time()
-    print("Time elapsed for scraping tweets from Twitter: ", get_tweet_time - start)
+                # Output file for training data and generated tweets
+                sentiment_file = os.path.join(output_dir, keyword + '_' + location + '_' + sentiment + '.txt')
+                output_file = os.path.join(output_dir, keyword + '_' + location + '_' + sentiment + '_generated.txt')
 
-    # Clean and analyze the sentiment of the gathered tweets
-    start = time.time()
-    tweet_set = analyze_tweets(tweet_file)
-    analyze_tweet_time = time.time()
-    print("Time elapsed for sentiment analysis: ", analyze_tweet_time - start)
-    print(tweet_set['sentiment'].value_counts())
+                # Gather training set of tweets based on sentiment
+                training_set = tweet_set.loc[tweet_set['sentiment'] == sentiment]
+                with open(sentiment_file, 'w') as file:
+                    file.writelines([line + '\n' for line in training_set['clean']])
 
-    # Gather training set of tweets based on sentiment
-    training_set = tweet_set.loc[tweet_set['sentiment'] == sentiment]
-    with open(sentiment_file, 'w') as f:
-        f.writelines([line + '\n' for line in training_set['clean']])
-
-    # Train model on tweet set
-    start = time.time()
-    train_model(sentiment_file, output_file)
-    training_time = time.time()
-    print("Time elapsed for training: ", training_time - start)
+                # Train model on tweet set
+                start = time.time()
+                train_model(sentiment_file, output_file)
+                training_time = time.time()
+                print("Time elapsed for training: ", training_time - start)
 
 
